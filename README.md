@@ -1,6 +1,6 @@
 # Supplier & Delivery Performance Dashboard (SQL Server + Power BI)
 
-**English** · [Deutsch](README.de.md) · [فارسی](README.fa.md)
+**English** · [Deutsch](README.de.md) 
 
 > Which suppliers deliver late, cause quality complaints – and where should purchasing act first?
 

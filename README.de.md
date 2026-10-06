@@ -1,6 +1,6 @@
 # Lieferanten- und Liefertreue-Dashboard (SQL Server + Power BI)
 
-[English](README.md) · **Deutsch** · [فارسی](README.fa.md)
+[English](README.md) · **Deutsch** 
 
 > Welche Lieferanten liefern verspätet oder verursachen Reklamationen – und wo sollte der Einkauf zuerst ansetzen?
 
