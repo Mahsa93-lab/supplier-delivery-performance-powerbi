@@ -1,0 +1,19 @@
+{
+  "name": "Supplier Performance",
+  "dataColors": ["#1F4E79", "#C0632B", "#6AA84F", "#7D8EA3", "#4A8FC9", "#E3A857", "#9E5AA8", "#2E6DA4"],
+  "foreground": "#1D2430",
+  "background": "#FFFFFF",
+  "tableAccent": "#1F4E79",
+  "good": "#3D7A2A",
+  "neutral": "#E3A857",
+  "bad": "#C0392B",
+  "maximum": "#1F4E79",
+  "center": "#BFD4E8",
+  "minimum": "#FFFFFF",
+  "textClasses": {
+    "title": { "fontFace": "Segoe UI Semibold", "fontSize": 13, "color": "#1F4E79" },
+    "header": { "fontFace": "Segoe UI Semibold", "fontSize": 12, "color": "#1D2430" },
+    "label": { "fontFace": "Segoe UI", "fontSize": 10, "color": "#5B6574" },
+    "callout": { "fontFace": "Segoe UI Semibold", "fontSize": 24, "color": "#1F4E79" }
+  }
+}

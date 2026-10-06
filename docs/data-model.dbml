@@ -1,0 +1,73 @@
+// Paste into https://dbdiagram.io → export PNG as docs/data-model.png
+
+Table dim_date {
+  Date date [pk]
+  Year int
+  "Year-Month" varchar
+  "Is Analysis Period" boolean
+}
+
+Table dim_customer {
+  customer_id varchar [pk]
+  customer_unique_id varchar
+  city varchar
+  state varchar
+}
+
+Table dim_seller {
+  seller_id varchar [pk]
+  city varchar
+  state varchar
+}
+
+Table dim_product {
+  product_id varchar [pk]
+  category varchar
+  weight_g int
+}
+
+Table fact_orders {
+  order_id varchar [pk, note: '1 row per order – customer view']
+  customer_id varchar
+  purchase_date date
+  order_status varchar
+  is_canceled int
+  delivery_on_time int
+  lead_time_days int
+  days_late int
+  is_complaint int
+  item_count int
+  order_value_brl decimal
+}
+
+Table fact_order_items {
+  order_id varchar
+  order_item_id int
+  seller_id varchar
+  product_id varchar
+  customer_id varchar
+  purchase_date date
+  price_brl decimal
+  freight_brl decimal
+  handover_on_time int
+  seller_processing_days int
+  is_complaint int
+  indexes { (order_id, order_item_id) [pk] }
+  Note: '1 row per order item – supplier view'
+}
+
+Table dq_checks {
+  check_id int [pk]
+  dimension varchar
+  table_name varchar
+  check_name varchar
+  failed_rows int
+  total_rows int
+}
+
+Ref: fact_orders.purchase_date > dim_date.Date
+Ref: fact_order_items.purchase_date > dim_date.Date
+Ref: fact_orders.customer_id > dim_customer.customer_id
+Ref: fact_order_items.customer_id > dim_customer.customer_id
+Ref: fact_order_items.seller_id > dim_seller.seller_id
+Ref: fact_order_items.product_id > dim_product.product_id

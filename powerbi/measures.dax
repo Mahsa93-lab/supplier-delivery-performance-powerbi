@@ -1,0 +1,154 @@
+// =====================================================================
+// measures.dax – DAX for the Supplier & Delivery Performance report
+//
+// Tables (from SQL Server views, Import mode):
+//   fact_orders       ← mart.fact_orders        one row per order (customer view)
+//   fact_order_items  ← mart.fact_order_items   one row per order item (supplier view)
+//   dim_seller / dim_customer / dim_product ← mart.dim_*
+//   dq_checks         ← dq.v_checks             (no relationships)
+//
+// Relationships (all 1:* , single direction):
+//   dim_date[Date]           → fact_orders[purchase_date], fact_order_items[purchase_date]
+//   dim_customer[customer_id]→ fact_orders[customer_id],   fact_order_items[customer_id]
+//   dim_seller[seller_id]    → fact_order_items[seller_id]
+//   dim_product[product_id]  → fact_order_items[product_id]
+//
+// Create an empty table "_Measures" (Home → Enter data → OK) and add every measure there.
+// Expected values for checking: docs/expected-results.md
+// =====================================================================
+
+// ---------- 1. Date dimension (Modeling → New table) ----------
+dim_date =
+ADDCOLUMNS (
+    CALENDAR ( DATE ( 2016, 1, 1 ), DATE ( 2018, 12, 31 ) ),
+    "Year", YEAR ( [Date] ),
+    "Quarter", "Q" & QUARTER ( [Date] ),
+    "Month No", MONTH ( [Date] ),
+    "Month", FORMAT ( [Date], "MMM yyyy" ),
+    "Year-Month", FORMAT ( [Date], "yyyy-MM" ),
+    "ISO Week", WEEKNUM ( [Date], 21 ),
+    // 2016 and Sep/Oct 2018 contain only a handful of orders → excluded from trend analysis
+    "Is Analysis Period", [Date] >= DATE ( 2017, 1, 1 ) && [Date] <= DATE ( 2018, 8, 31 )
+)
+// Then: Table tools → Mark as date table (column Date); sort "Month" by "Year-Month".
+
+// ---------- 2. Volume & revenue ----------
+Orders = COUNTROWS ( fact_orders )
+
+Order Items = COUNTROWS ( fact_order_items )
+
+Revenue (BRL) = SUM ( fact_order_items[price_brl] )
+
+Freight (BRL) = SUM ( fact_order_items[freight_brl] )
+
+Active Suppliers = DISTINCTCOUNT ( fact_order_items[seller_id] )
+
+Avg Order Value (BRL) =
+DIVIDE ( [Revenue (BRL)], DISTINCTCOUNT ( fact_order_items[order_id] ) )
+
+Freight Share % = DIVIDE ( [Freight (BRL)], [Revenue (BRL)] + [Freight (BRL)] )
+
+// ---------- 3. Customer view (fact_orders) ----------
+Cancellation Rate % =
+DIVIDE ( CALCULATE ( [Orders], fact_orders[is_canceled] = 1 ), [Orders] )
+
+Customer OTD % =
+DIVIDE (
+    CALCULATE ( [Orders], fact_orders[delivery_on_time] = 1 ),
+    CALCULATE ( [Orders], NOT ISBLANK ( fact_orders[delivery_on_time] ) )
+)
+
+Late Orders = CALCULATE ( [Orders], fact_orders[delivery_on_time] = 0 )
+
+Avg Lead Time (days) = AVERAGE ( fact_orders[lead_time_days] )
+
+Avg Days Late (late orders) =
+CALCULATE ( AVERAGE ( fact_orders[days_late] ), fact_orders[delivery_on_time] = 0 )
+
+Complaint Rate % =
+DIVIDE (
+    CALCULATE ( [Orders], fact_orders[is_complaint] = 1 ),
+    CALCULATE ( [Orders], NOT ISBLANK ( fact_orders[is_complaint] ) )
+)
+
+Complaint Rate % (late) = CALCULATE ( [Complaint Rate %], fact_orders[delivery_on_time] = 0 )
+
+Complaint Rate % (on time) = CALCULATE ( [Complaint Rate %], fact_orders[delivery_on_time] = 1 )
+
+// ---------- 4. Supplier view (fact_order_items) ----------
+Supplier OTD % =
+DIVIDE (
+    CALCULATE ( [Order Items], fact_order_items[handover_on_time] = 1 ),
+    CALCULATE ( [Order Items], NOT ISBLANK ( fact_order_items[handover_on_time] ) )
+)
+
+Late Handovers = CALCULATE ( [Order Items], fact_order_items[handover_on_time] = 0 )
+
+Avg Seller Processing (days) = AVERAGE ( fact_order_items[seller_processing_days] )
+
+Supplier Complaint Rate % =
+DIVIDE (
+    CALCULATE ( [Order Items], fact_order_items[is_complaint] = 1 ),
+    CALCULATE ( [Order Items], NOT ISBLANK ( fact_order_items[is_complaint] ) )
+)
+
+// Use as visual-level filter "is 1" so suppliers with very few items do not dominate rankings
+Is Relevant Supplier = IF ( [Order Items] >= 20, 1, 0 )
+
+// ---------- 5. Time intelligence ----------
+Revenue PY (BRL) = CALCULATE ( [Revenue (BRL)], SAMEPERIODLASTYEAR ( dim_date[Date] ) )
+
+Revenue YoY % = DIVIDE ( [Revenue (BRL)] - [Revenue PY (BRL)], [Revenue PY (BRL)] )
+
+Customer OTD % 3M Rolling =
+CALCULATE ( [Customer OTD %], DATESINPERIOD ( dim_date[Date], MAX ( dim_date[Date] ), -3, MONTH ) )
+
+// ---------- 6. Supplier scorecard: ranking, ABC, Pareto, traffic light ----------
+Supplier Revenue Rank =
+IF (
+    HASONEVALUE ( dim_seller[seller_id] ),
+    RANKX ( ALL ( dim_seller[seller_id] ), [Revenue (BRL)], , DESC, DENSE )
+)
+
+Cumulative Revenue Share =
+VAR _current = [Revenue (BRL)]
+VAR _all = ADDCOLUMNS ( ALL ( dim_seller[seller_id] ), "@rev", [Revenue (BRL)] )
+RETURN
+    IF (
+        NOT ISBLANK ( _current ),
+        DIVIDE ( SUMX ( FILTER ( _all, [@rev] >= _current ), [@rev] ), SUMX ( _all, [@rev] ) )
+    )
+
+ABC Class =
+VAR _share = [Cumulative Revenue Share]
+RETURN
+    SWITCH ( TRUE (), ISBLANK ( _share ), BLANK (), _share <= 0.80, "A", _share <= 0.95, "B", "C" )
+
+Late Handover Share % =
+DIVIDE ( [Late Handovers], CALCULATE ( [Late Handovers], ALL ( dim_seller ) ) )
+
+Cumulative Late Handover Share % =
+VAR _current = [Late Handovers]
+VAR _all = ADDCOLUMNS ( ALL ( dim_seller[seller_id] ), "@late", [Late Handovers] )
+RETURN
+    IF (
+        NOT ISBLANK ( _current ),
+        DIVIDE ( SUMX ( FILTER ( _all, [@late] >= _current ), [@late] ), SUMX ( _all, [@late] ) )
+    )
+
+// 1 = green, 2 = amber, 3 = red → Conditional formatting → Icons → Rules (based on this field)
+OTD Status =
+VAR _otd = [Supplier OTD %]
+RETURN
+    SWITCH ( TRUE (), ISBLANK ( _otd ), BLANK (), _otd >= 0.95, 1, _otd >= 0.90, 2, 3 )
+
+// ---------- 7. Data quality page (table dq_checks) ----------
+DQ Failed Rows = SUM ( dq_checks[failed_rows] )
+
+DQ Checked Rows = SUM ( dq_checks[total_rows] )
+
+DQ Failure Rate % = DIVIDE ( [DQ Failed Rows], [DQ Checked Rows] )
+
+DQ Score % = 1 - [DQ Failure Rate %]
+
+DQ Checks Failed = CALCULATE ( COUNTROWS ( dq_checks ), dq_checks[failed_rows] > 0 )

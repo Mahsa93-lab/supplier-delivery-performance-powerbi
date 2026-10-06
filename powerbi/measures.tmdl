@@ -1,0 +1,187 @@
+createOrReplace
+
+	ref table _Measures
+
+		measure 'Orders' = COUNTROWS ( fact_orders )
+			formatString: #,0
+			displayFolder: 1 Volume
+
+		measure 'Order Items' = COUNTROWS ( fact_order_items )
+			formatString: #,0
+			displayFolder: 1 Volume
+
+		measure 'Revenue (BRL)' = SUM ( fact_order_items[price_brl] )
+			formatString: #,0.00
+			displayFolder: 1 Volume
+
+		measure 'Freight (BRL)' = SUM ( fact_order_items[freight_brl] )
+			formatString: #,0.00
+			displayFolder: 1 Volume
+
+		measure 'Active Suppliers' = DISTINCTCOUNT ( fact_order_items[seller_id] )
+			formatString: #,0
+			displayFolder: 1 Volume
+
+		measure 'Avg Order Value (BRL)' = DIVIDE ( [Revenue (BRL)], DISTINCTCOUNT ( fact_order_items[order_id] ) )
+			formatString: #,0.00
+			displayFolder: 1 Volume
+
+		measure 'Freight Share %' = DIVIDE ( [Freight (BRL)], [Revenue (BRL)] + [Freight (BRL)] )
+			formatString: 0.0%
+			displayFolder: 1 Volume
+
+		/// Share of orders with status canceled or unavailable (order grain).
+		measure 'Cancellation Rate %' = DIVIDE ( CALCULATE ( [Orders], fact_orders[is_canceled] = 1 ), [Orders] )
+			formatString: 0.0%
+			displayFolder: 2 Customer
+
+		/// Share of delivered orders that arrived on or before the promised delivery date.
+		measure 'Customer OTD %' =
+				DIVIDE (
+					CALCULATE ( [Orders], fact_orders[delivery_on_time] = 1 ),
+					CALCULATE ( [Orders], NOT ISBLANK ( fact_orders[delivery_on_time] ) )
+				)
+			formatString: 0.0%
+			displayFolder: 2 Customer
+
+		measure 'Late Orders' = CALCULATE ( [Orders], fact_orders[delivery_on_time] == 0 )
+			formatString: #,0
+			displayFolder: 2 Customer
+
+		/// Average days from purchase to delivery to the customer.
+		measure 'Avg Lead Time (days)' = AVERAGE ( fact_orders[lead_time_days] )
+			formatString: 0.0
+			displayFolder: 2 Customer
+
+		measure 'Avg Days Late (late orders)' = CALCULATE ( AVERAGE ( fact_orders[days_late] ), fact_orders[delivery_on_time] == 0 )
+			formatString: 0.0
+			displayFolder: 2 Customer
+
+		/// Share of reviewed orders whose worst review score is 1 or 2 (complaint proxy).
+		measure 'Complaint Rate %' =
+				DIVIDE (
+					CALCULATE ( [Orders], fact_orders[is_complaint] = 1 ),
+					CALCULATE ( [Orders], NOT ISBLANK ( fact_orders[is_complaint] ) )
+				)
+			formatString: 0.0%
+			displayFolder: 2 Customer
+
+		measure 'Complaint Rate % (late)' = CALCULATE ( [Complaint Rate %], fact_orders[delivery_on_time] == 0 )
+			formatString: 0.0%
+			displayFolder: 2 Customer
+
+		measure 'Complaint Rate % (on time)' = CALCULATE ( [Complaint Rate %], fact_orders[delivery_on_time] = 1 )
+			formatString: 0.0%
+			displayFolder: 2 Customer
+
+		/// Share of items handed over to the carrier before the agreed shipping limit.
+		measure 'Supplier OTD %' =
+				DIVIDE (
+					CALCULATE ( [Order Items], fact_order_items[handover_on_time] = 1 ),
+					CALCULATE ( [Order Items], NOT ISBLANK ( fact_order_items[handover_on_time] ) )
+				)
+			formatString: 0.0%
+			displayFolder: 3 Supplier
+
+		measure 'Late Handovers' = CALCULATE ( [Order Items], fact_order_items[handover_on_time] == 0 )
+			formatString: #,0
+			displayFolder: 3 Supplier
+
+		/// Average days from approval to handover to the carrier; illogical sequences excluded.
+		measure 'Avg Seller Processing (days)' = AVERAGE ( fact_order_items[seller_processing_days] )
+			formatString: 0.0
+			displayFolder: 3 Supplier
+
+		measure 'Supplier Complaint Rate %' =
+				DIVIDE (
+					CALCULATE ( [Order Items], fact_order_items[is_complaint] = 1 ),
+					CALCULATE ( [Order Items], NOT ISBLANK ( fact_order_items[is_complaint] ) )
+				)
+			formatString: 0.0%
+			displayFolder: 3 Supplier
+
+		/// 1 if the supplier has at least 20 items in the current filter context.
+		measure 'Is Relevant Supplier' = IF ( [Order Items] >= 20, 1, 0 )
+			formatString: 0
+			displayFolder: 3 Supplier
+
+		measure 'Revenue PY (BRL)' = CALCULATE ( [Revenue (BRL)], SAMEPERIODLASTYEAR ( dim_date[Date] ) )
+			formatString: #,0.00
+			displayFolder: 4 Time
+
+		measure 'Revenue YoY %' = DIVIDE ( [Revenue (BRL)] - [Revenue PY (BRL)], [Revenue PY (BRL)] )
+			formatString: 0.0%
+			displayFolder: 4 Time
+
+		measure 'Customer OTD % 3M Rolling' = CALCULATE ( [Customer OTD %], DATESINPERIOD ( dim_date[Date], MAX ( dim_date[Date] ), -3, MONTH ) )
+			formatString: 0.0%
+			displayFolder: 4 Time
+
+		measure 'Supplier Revenue Rank' =
+				IF (
+					HASONEVALUE ( dim_seller[seller_id] ),
+					RANKX ( ALL ( dim_seller[seller_id] ), [Revenue (BRL)], , DESC, DENSE )
+				)
+			formatString: #,0
+			displayFolder: 5 Scorecard
+
+		measure 'Cumulative Revenue Share' =
+				VAR _current = [Revenue (BRL)]
+				VAR _all = ADDCOLUMNS ( ALL ( dim_seller[seller_id] ), "@rev", [Revenue (BRL)] )
+				RETURN
+					IF (
+						NOT ISBLANK ( _current ),
+						DIVIDE ( SUMX ( FILTER ( _all, [@rev] >= _current ), [@rev] ), SUMX ( _all, [@rev] ) )
+					)
+			formatString: 0.0%
+			displayFolder: 5 Scorecard
+
+		/// A = suppliers up to 80 % cumulative revenue, B up to 95 %, C rest.
+		measure 'ABC Class' =
+				VAR _share = [Cumulative Revenue Share]
+				RETURN
+					SWITCH ( TRUE (), ISBLANK ( _share ), BLANK (), _share <= 0.80, "A", _share <= 0.95, "B", "C" )
+			displayFolder: 5 Scorecard
+
+		measure 'Late Handover Share %' = DIVIDE ( [Late Handovers], CALCULATE ( [Late Handovers], ALL ( dim_seller ) ) )
+			formatString: 0.0%
+			displayFolder: 5 Scorecard
+
+		measure 'Cumulative Late Handover Share %' =
+				VAR _current = [Late Handovers]
+				VAR _all = ADDCOLUMNS ( ALL ( dim_seller[seller_id] ), "@late", [Late Handovers] )
+				RETURN
+					IF (
+						NOT ISBLANK ( _current ),
+						DIVIDE ( SUMX ( FILTER ( _all, [@late] >= _current ), [@late] ), SUMX ( _all, [@late] ) )
+					)
+			formatString: 0.0%
+			displayFolder: 5 Scorecard
+
+		measure 'OTD Status' =
+				VAR _otd = [Supplier OTD %]
+				RETURN
+					SWITCH ( TRUE (), ISBLANK ( _otd ), BLANK (), _otd >= 0.95, 1, _otd >= 0.90, 2, 3 )
+			formatString: 0
+			displayFolder: 5 Scorecard
+
+		measure 'DQ Failed Rows' = SUM ( dq_checks[failed_rows] )
+			formatString: #,0
+			displayFolder: 6 Data Quality
+
+		measure 'DQ Checked Rows' = SUM ( dq_checks[total_rows] )
+			formatString: #,0
+			displayFolder: 6 Data Quality
+
+		measure 'DQ Failure Rate %' = DIVIDE ( [DQ Failed Rows], [DQ Checked Rows] )
+			formatString: 0.0%
+			displayFolder: 6 Data Quality
+
+		/// 1 - failed rows / checked rows over all data-quality checks.
+		measure 'DQ Score %' = 1 - [DQ Failure Rate %]
+			formatString: 0.0%
+			displayFolder: 6 Data Quality
+
+		measure 'DQ Checks Failed' = CALCULATE ( COUNTROWS ( dq_checks ), dq_checks[failed_rows] > 0 )
+			formatString: #,0
+			displayFolder: 6 Data Quality

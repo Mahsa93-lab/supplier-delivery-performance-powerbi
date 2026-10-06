@@ -1,0 +1,56 @@
+// validate_measures.dax – paste into Power BI Desktop → DAX query view → Run.
+// Each EVALUATE produces one result tab. Compare with docs/expected-results.md.
+// Percentages appear as decimals here (0.9323 = 93.23 %).
+
+// 1) All data – expected: Orders 99441 · Order Items 112650 · Revenue 13591643.70
+//    Late Orders 6535 · Late Handovers 10423
+//    Cancellation 0.0124 · Customer OTD 0.9323 · Supplier OTD 0.9065 · Complaint 0.1473
+//    Complaint late 0.6246 · on time 0.0931 · Lead time 12.50 · Days late 10.62 · Processing 2.80 · DQ Score 0.9962
+EVALUATE
+ROW (
+    "Orders", [Orders],
+    "Order Items", [Order Items],
+    "Revenue (BRL)", [Revenue (BRL)],
+    "Late Orders", [Late Orders],
+    "Late Handovers", [Late Handovers],
+    "Cancellation Rate %", ROUND ( [Cancellation Rate %], 4 ),
+    "Customer OTD %", ROUND ( [Customer OTD %], 4 ),
+    "Supplier OTD %", ROUND ( [Supplier OTD %], 4 ),
+    "Complaint Rate %", ROUND ( [Complaint Rate %], 4 ),
+    "Complaint Rate % (late)", ROUND ( [Complaint Rate % (late)], 4 ),
+    "Complaint Rate % (on time)", ROUND ( [Complaint Rate % (on time)], 4 ),
+    "Avg Lead Time (days)", ROUND ( [Avg Lead Time (days)], 2 ),
+    "Avg Days Late (late orders)", ROUND ( [Avg Days Late (late orders)], 2 ),
+    "Avg Seller Processing (days)", ROUND ( [Avg Seller Processing (days)], 2 ),
+    "DQ Score %", ROUND ( [DQ Score %], 4 )
+)
+
+// 2) Analysis period 2017-01 … 2018-08 – expected: Orders 99092 · Revenue 13541712.78
+//    Customer OTD 0.9321 · Supplier OTD 0.9077 · Complaint 0.1467 · Revenue YoY (Jan–Aug 2018) 1.3726
+EVALUATE
+CALCULATETABLE (
+    ROW (
+        "Orders", [Orders],
+        "Revenue (BRL)", [Revenue (BRL)],
+        "Customer OTD %", ROUND ( [Customer OTD %], 4 ),
+        "Supplier OTD %", ROUND ( [Supplier OTD %], 4 ),
+        "Complaint Rate %", ROUND ( [Complaint Rate %], 4 ),
+        "Revenue YoY % (Jan-Aug 2018)",
+            ROUND ( CALCULATE ( [Revenue YoY %], DATESBETWEEN ( dim_date[Date], DATE ( 2018, 1, 1 ), DATE ( 2018, 8, 31 ) ) ), 4 )
+    ),
+    dim_date[Is Analysis Period] = TRUE ()
+)
+
+// 3) Supplier scorecard (analysis period) – expected: A 540 · B 758 · C 1770 · Relevant 890 · Red relevant 267
+EVALUATE
+CALCULATETABLE (
+    ROW (
+        "A suppliers", COUNTROWS ( FILTER ( VALUES ( dim_seller[seller_id] ), [ABC Class] = "A" ) ),
+        "B suppliers", COUNTROWS ( FILTER ( VALUES ( dim_seller[seller_id] ), [ABC Class] = "B" ) ),
+        "C suppliers", COUNTROWS ( FILTER ( VALUES ( dim_seller[seller_id] ), [ABC Class] = "C" ) ),
+        "Relevant suppliers", COUNTROWS ( FILTER ( VALUES ( dim_seller[seller_id] ), [Is Relevant Supplier] = 1 ) ),
+        "Red relevant suppliers",
+            COUNTROWS ( FILTER ( VALUES ( dim_seller[seller_id] ), [Is Relevant Supplier] = 1 && [OTD Status] = 3 ) )
+    ),
+    dim_date[Is Analysis Period] = TRUE ()
+)
